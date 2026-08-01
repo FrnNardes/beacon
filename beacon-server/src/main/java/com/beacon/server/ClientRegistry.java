@@ -11,11 +11,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Thread-safe registry of all connected clients.
  * Maps username → ClientHandler (TCP) and username → InetSocketAddress (UDP).
- * Accessed by every client thread and by the UdpServer thread.
+ * Also manages server-assigned user colors from a rotative palette.
  */
 public class ClientRegistry {
 
@@ -23,11 +24,41 @@ public class ClientRegistry {
 
     /**
      * UDP addresses of clients, learned from the source address of their first TYPING datagram.
-     * Used by UdpServer to relay typing indicators to the correct peers.
      */
     private final ConcurrentHashMap<String, InetSocketAddress> udpAddresses = new ConcurrentHashMap<>();
 
+    /**
+     * Server-assigned ANSI color for each user (e.g., "cyan", "magenta").
+     * Rotated from the palette to ensure distinct colors among online users.
+     */
+    private final ConcurrentHashMap<String, String> userColors = new ConcurrentHashMap<>();
+
+    /**
+     * Palette of distinguishable ANSI color names.
+     * These map to 256-color ANSI codes on the client side.
+     */
+    private static final String[] COLOR_PALETTE = {
+            "cyan", "magenta", "yellow", "green", "blue",
+            "red", "orange", "pink", "lime", "teal"
+    };
+
+    private final AtomicInteger colorIndex = new AtomicInteger(0);
+
+    /**
+     * Assigns the next color from the palette (round-robin).
+     */
+    public String assignColor(String username) {
+        String color = COLOR_PALETTE[colorIndex.getAndIncrement() % COLOR_PALETTE.length];
+        userColors.put(username, color);
+        return color;
+    }
+
+    public String getColor(String username) {
+        return userColors.getOrDefault(username, "white");
+    }
+
     // ── TCP registry ─────────────────────────────────────────────────────
+
 
     /**
      * Registers a client. Returns false if the username is already taken.

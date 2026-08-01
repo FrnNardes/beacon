@@ -14,10 +14,17 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+
+import com.beacon.client.ui.TerminalUI;
+import org.jline.reader.UserInterruptException;
+import org.jline.reader.EndOfFileException;
 
 /**
  * Beacon chat client entry point.
@@ -29,7 +36,10 @@ public class BeaconClient {
     private final String host;
     private final int port;
 
-    /** UDP socket shared between typing sender (main thread) and receiver (daemon thread). */
+    /**
+     * UDP socket shared between typing sender (main thread) and receiver (daemon
+     * thread).
+     */
     private DatagramSocket udpSocket;
     private InetAddress serverAddress;
     private int udpPort;
@@ -37,7 +47,8 @@ public class BeaconClient {
 
     /**
      * Tracks when each remote user was last seen typing.
-     * Entries older than TYPING_EXPIRY_MS are cleaned up and the indicator is cleared.
+     * Entries older than TYPING_EXPIRY_MS are cleaned up and the indicator is
+     * cleared.
      */
     private final ConcurrentHashMap<String, Long> typingUsers = new ConcurrentHashMap<>();
     private static final long TYPING_EXPIRY_MS = 3000; // 3 seconds
@@ -51,29 +62,81 @@ public class BeaconClient {
         this.port = port;
     }
 
+    private TerminalUI ui;
+
     public void start() {
-        System.out.println("Connecting to " + host + ":" + port + "...");
+        try {
+            ui = new TerminalUI(this::sendTypingIndicator);
+            ui.printBanner();
+        } catch (IOException e) {
+            System.err.println("Failed to initialize terminal: " + e.getMessage());
+            return;
+        }
 
-        // try-with-resources: Socket and streams are auto-closed on exit
+        while (true) {
+            boolean quit = connectAndRun();
+            if (quit) {
+                break;
+            }
+            ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgYellow().a("--- Retrying Login ---").reset().toString());
+        }
+    }
+
+    private boolean connectAndRun() {
+        String password = null;
+        try {
+            String userPrompt = org.fusesource.jansi.Ansi.ansi().fgCyan().a("Username: ").reset().toString();
+            username = ui.getLineReader().readLine(userPrompt).trim();
+            if (username.equalsIgnoreCase("/quit") || username.equalsIgnoreCase("quit") || username.equalsIgnoreCase("exit")) {
+                return true;
+            }
+            
+            String passPrompt = org.fusesource.jansi.Ansi.ansi().fgCyan().a("Password: ").reset().toString();
+            password = ui.getLineReader().readLine(passPrompt, '*').trim(); // Mask password
+            if (password.equalsIgnoreCase("/quit") || password.equalsIgnoreCase("quit") || password.equalsIgnoreCase("exit")) {
+                return true;
+            }
+            
+            ui.printAbove("Connecting to " + host + ":" + port + "...");
+        } catch (UserInterruptException | EndOfFileException e) {
+            return true;
+        }
+
         try (Socket socket = new Socket(host, port);
-             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
-
-            Scanner scanner = new Scanner(System.in);
-
-            System.out.print("Username: ");
-            username = scanner.nextLine().trim();
-            System.out.print("Password: ");
-            String password = scanner.nextLine().trim();
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
 
             // Send LOGIN message with password in the content field
             Message loginMsg = new Message(MessageType.LOGIN)
                     .sender(username)
                     .content(password);
             out.println(ProtocolUtil.serialize(loginMsg));
+            
+            // Synchronously wait for login response before starting reader
+            String responseStr = in.readLine();
+            if (responseStr == null) {
+                ui.printAbove(ui.formatError("Server closed connection during login."));
+                return false;
+            }
+            
+            try {
+                Message response = ProtocolUtil.deserialize(responseStr);
+                if (response.getType() == MessageType.LOGIN_ERROR) {
+                    ui.printAbove(ui.formatError("Login failed: " + response.getContent()));
+                    return false;
+                } else if (response.getType() != MessageType.LOGIN_OK) {
+                    ui.printAbove(ui.formatError("Unexpected response: " + response.getType()));
+                    return false;
+                }
+                
+                ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] Logged in successfully!").reset().toString());
+            } catch (ProtocolException e) {
+                ui.printAbove(ui.formatError("Invalid login response from server"));
+                return false;
+            }
 
             // Start background thread to receive messages from server
-            TcpServerReader reader = new TcpServerReader(in);
+            TcpServerReader reader = new TcpServerReader(in, ui);
             Thread readerThread = new Thread(reader, "server-reader");
             readerThread.setDaemon(true); // dies when main thread exits
             readerThread.start();
@@ -82,13 +145,15 @@ public class BeaconClient {
             initUdpTyping(socket.getInetAddress());
 
             // Main thread: read user input and send to server
-            inputLoop(scanner, out, username);
+            inputLoop(out, username);
 
             reader.stop();
+            return true; // Graceful exit (/quit)
 
         } catch (IOException e) {
-            System.err.println("Connection failed: " + e.getMessage());
-            System.err.println("Make sure the server is running on " + host + ":" + port);
+            ui.printAbove(ui.formatError("Connection failed: " + e.getMessage()));
+            ui.printAbove(ui.formatError("Make sure the server is running on " + host + ":" + port));
+            return false;
         } finally {
             if (udpSocket != null && !udpSocket.isClosed()) {
                 udpSocket.close();
@@ -120,9 +185,10 @@ public class BeaconClient {
             typingCleaner.setDaemon(true);
             typingCleaner.start();
 
-            System.out.println("[UDP] Typing indicator active (server UDP port " + udpPort + ")");
+            // ui.printAbove("[UDP] Typing indicator active (server UDP port " + udpPort +
+            // ")");
         } catch (SocketException e) {
-            System.err.println("[UDP] Failed to initialize typing: " + e.getMessage());
+            ui.printAbove(ui.formatError("[UDP] Failed to initialize typing: " + e.getMessage()));
             // Non-fatal — TCP chat continues to work without typing indicators
         }
     }
@@ -137,10 +203,12 @@ public class BeaconClient {
      * @param input the current input line (used to detect /msg recipient)
      */
     private void sendTypingIndicator(String input) {
-        if (udpSocket == null || udpSocket.isClosed()) return;
+        if (udpSocket == null || udpSocket.isClosed())
+            return;
 
         long now = System.currentTimeMillis();
-        if (now - lastTypingSentMs < TYPING_THROTTLE_MS) return;
+        if (now - lastTypingSentMs < TYPING_THROTTLE_MS)
+            return;
         lastTypingSentMs = now;
 
         try {
@@ -187,7 +255,7 @@ public class BeaconClient {
                         typingUsers.put(sender, System.currentTimeMillis());
 
                         if (isNew) {
-                            System.out.println("  " + sender + " is typing...");
+                            updateTypingUI();
                         }
                     }
                 }
@@ -210,14 +278,17 @@ public class BeaconClient {
                 Thread.sleep(500); // check every 500ms
 
                 long now = System.currentTimeMillis();
+                boolean changed = false;
                 Iterator<Map.Entry<String, Long>> it = typingUsers.entrySet().iterator();
                 while (it.hasNext()) {
                     Map.Entry<String, Long> entry = it.next();
                     if (now - entry.getValue() > TYPING_EXPIRY_MS) {
                         it.remove();
-                        // Typing indicator expired — no visual cleanup needed
-                        // since the next message will push it off screen
+                        changed = true;
                     }
+                }
+                if (changed) {
+                    updateTypingUI();
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -226,26 +297,41 @@ public class BeaconClient {
         }
     }
 
+    private void updateTypingUI() {
+        if (ui != null) {
+            Set<String> activeTypers = new HashSet<>(typingUsers.keySet());
+            ui.updatePrompt(activeTypers);
+        }
+    }
+
     /**
      * Reads user input line by line and sends to server.
      * Parses commands (/msg, /list, /quit, etc.) or sends as broadcast.
-     * Sends a TYPING indicator via UDP before each message.
      */
-    private void inputLoop(Scanner scanner, PrintWriter out, String username) {
-        while (scanner.hasNextLine()) {
-            String input = scanner.nextLine().trim();
-            if (input.isEmpty()) continue;
+    private void inputLoop(PrintWriter out, String username) {
+        ui.updatePrompt(Collections.emptySet()); // initialize prompt
 
-            // Send typing indicator via UDP before processing the message
-            sendTypingIndicator(input);
+        while (true) {
+            try {
+                // Pass the multi-line delimited prompt to readLine
+                String input = ui.getLineReader().readLine(ui.getPromptString()).trim();
 
-            Message msg = parseInput(input);
-            if (msg == null) continue;
+                if (input.isEmpty())
+                    continue;
 
-            out.println(ProtocolUtil.serialize(msg));
+                Message msg = parseInput(input);
+                if (msg == null)
+                    continue;
 
-            if (msg.getType() == MessageType.QUIT) {
-                System.out.println("Disconnecting...");
+                out.println(ProtocolUtil.serialize(msg));
+
+                if (msg.getType() == MessageType.QUIT) {
+                    ui.printAbove("Disconnecting...");
+                    break;
+                }
+            } catch (UserInterruptException | EndOfFileException e) {
+                // Handle Ctrl-C / Ctrl-D
+                out.println(ProtocolUtil.serialize(new Message(MessageType.QUIT)));
                 break;
             }
         }
@@ -274,7 +360,7 @@ public class BeaconClient {
 
             case "/msg" -> {
                 if (parts.length < 3) {
-                    System.out.println("Usage: /msg <username> <message>");
+                    ui.printAbove(ui.formatError("Usage: /msg <username> <message>"));
                     yield null; // null means "don't send anything"
                 }
                 yield new Message(MessageType.PRIVATE)
@@ -284,7 +370,7 @@ public class BeaconClient {
 
             case "/search" -> {
                 if (parts.length < 2) {
-                    System.out.println("Usage: /search <keyword>");
+                    ui.printAbove(ui.formatError("Usage: /search <keyword>"));
                     yield null;
                 }
                 yield new Message(MessageType.SEARCH).content(parts[1]);
@@ -293,8 +379,8 @@ public class BeaconClient {
             case "/stats" -> new Message(MessageType.STATS);
 
             default -> {
-                System.out.println("Unknown command: " + command);
-                System.out.println("Available: /msg /list /search /stats /quit");
+                ui.printAbove(ui.formatError("Unknown command: " + command));
+                ui.printAbove(ui.formatError("Available: /msg /list /search /stats /quit"));
                 yield null;
             }
         };
@@ -304,7 +390,8 @@ public class BeaconClient {
         String host = null;
         int port = 4040;
 
-        if (args.length >= 1) host = args[0];
+        if (args.length >= 1)
+            host = args[0];
         if (args.length >= 2) {
             try {
                 port = Integer.parseInt(args[1]);
@@ -351,4 +438,3 @@ public class BeaconClient {
         new BeaconClient(host, port).start();
     }
 }
-

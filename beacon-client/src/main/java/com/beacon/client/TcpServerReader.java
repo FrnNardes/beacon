@@ -1,8 +1,10 @@
 package com.beacon.client;
 
+import com.beacon.client.ui.TerminalUI;
 import com.beacon.protocol.Message;
 import com.beacon.protocol.ProtocolException;
 import com.beacon.protocol.ProtocolUtil;
+import org.fusesource.jansi.Ansi;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -14,10 +16,12 @@ import java.io.IOException;
 public class TcpServerReader implements Runnable {
 
     private final BufferedReader in;
+    private final TerminalUI ui;
     private volatile boolean running = true;
 
-    public TcpServerReader(BufferedReader in) {
+    public TcpServerReader(BufferedReader in, TerminalUI ui) {
         this.in = in;
+        this.ui = ui;
     }
 
     @Override
@@ -29,65 +33,49 @@ public class TcpServerReader implements Runnable {
                     Message msg = ProtocolUtil.deserialize(line);
                     displayMessage(msg);
                 } catch (ProtocolException e) {
-                    System.out.println("[!] Bad message from server: " + e.getMessage());
+                    ui.printAbove(ui.formatError("Bad message from server: " + e.getMessage()));
                 }
             }
         } catch (IOException e) {
             if (running) {
-                System.out.println("\n[!] Connection lost: " + e.getMessage());
-                System.out.println("Press Enter to retry or type /quit to exit.");
+                ui.printAbove(ui.formatError("Connection lost: " + e.getMessage()));
+                ui.printAbove("Press Enter to retry or type /quit to exit.");
             }
         }
     }
 
     /**
-     * Renders a message to the terminal based on its type.
-     * For now, simple System.out — Jansi colors come in Slice 9.
+     * Renders a message to the terminal via JLine printAbove.
      */
     private void displayMessage(Message msg) {
         switch (msg.getType()) {
-            case LOGIN_OK -> System.out.println("[✓] Logged in successfully!");
-            case LOGIN_ERROR -> System.out.println("[✗] Login failed: " + msg.getContent());
+            case LOGIN_OK -> ui.printAbove(Ansi.ansi().fgGreen().a("[✓] Logged in successfully!").reset().toString());
+            case LOGIN_ERROR -> ui.printAbove(ui.formatError("Login failed: " + msg.getContent()));
 
-            case MESSAGE -> System.out.println(
-                    formatTimestamp(msg) + msg.getSender() + ": " + msg.getContent());
-
-            case PRIVATE -> System.out.println(
-                    formatTimestamp(msg) + "[PM] " + msg.getSender() + " → " +
-                    msg.getRecipient() + ": " + msg.getContent());
+            case MESSAGE -> ui.printAbove(ui.formatMessage(msg, false));
+            case PRIVATE -> ui.printAbove(ui.formatPrivate(msg, false));
 
             // History messages are past messages sent on login
-            case HISTORY -> System.out.println(
-                    "  " + formatTimestamp(msg) + msg.getSender() + ": " + msg.getContent());
+            case HISTORY -> ui.printAbove(ui.formatMessage(msg, true));
 
-            case JOINED -> System.out.println("[+] " + msg.getSender() + " joined the beacon");
-            case LEFT -> System.out.println("[-] " + msg.getSender() + " left the beacon");
+            case JOINED -> ui.printAbove(ui.formatSystem(msg, "JOINED", Ansi.Color.GREEN));
+            case LEFT -> ui.printAbove(ui.formatSystem(msg, "LEFT", Ansi.Color.RED));
 
-            case USER_LIST -> System.out.println("[users] " + msg.getContent());
+            case USER_LIST -> ui.printAbove(Ansi.ansi().fgCyan().a("[users] " + msg.getContent()).reset().toString());
 
-            case SEARCH_RESULT -> System.out.println(
-                    "  🔍 " + formatTimestamp(msg) + msg.getSender() + ": " + msg.getContent());
+            case SEARCH_RESULT ->
+                ui.printAbove(Ansi.ansi().fgYellow().a("  🔍 ").reset() + ui.formatMessage(msg, true));
 
             case STATS_RESULT -> {
-                System.out.println("── stats ──────────────────");
-                System.out.println(msg.getContent());
-                System.out.println("───────────────────────────");
+                ui.printAbove(Ansi.ansi().fgCyan().a("────────── STATS ───────────").reset().toString());
+                ui.printAbove(msg.getContent());
+                ui.printAbove(Ansi.ansi().fgCyan().a("────────────────────────────").reset().toString());
             }
 
-            case ERROR -> System.out.println("[!] " + msg.getContent());
+            case ERROR -> ui.printAbove(ui.formatError(msg.getContent()));
 
-            default -> System.out.println("[?] " + msg);
+            default -> ui.printAbove("[?] " + msg);
         }
-    }
-
-    private String formatTimestamp(Message msg) {
-        if (msg.getTimestamp() == null) return "";
-        // Extract HH:mm from ISO timestamp (e.g., "2026-07-30T23:12:00" → "23:12")
-        String ts = msg.getTimestamp();
-        if (ts.length() >= 16) {
-            return "[" + ts.substring(11, 16) + "] ";
-        }
-        return "[" + ts + "] ";
     }
 
     public void stop() {

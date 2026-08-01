@@ -120,13 +120,16 @@ public class ClientHandler implements Runnable {
         }
 
         this.username = requestedName;
-        sendMessage(new Message(MessageType.LOGIN_OK));
+
+        // Assign a unique color from the server palette
+        String color = registry.assignColor(username);
+        sendMessage(new Message(MessageType.LOGIN_OK).color(color));
         System.out.println("[+] " + username + " logged in from " + socket.getRemoteSocketAddress());
 
         // Send recent message history (dimmed on client side)
         sendHistory();
 
-        broadcast(new Message(MessageType.JOINED).sender(username));
+        broadcast(new Message(MessageType.JOINED).sender(username).color(color));
         return true;
     }
 
@@ -185,7 +188,8 @@ public class ClientHandler implements Runnable {
                 .id(id)
                 .sender(username)
                 .content(msg.getContent())
-                .timestamp(timestamp);
+                .timestamp(timestamp)
+                .color(registry.getColor(username));
 
         broadcast(outgoing);
     }
@@ -218,7 +222,8 @@ public class ClientHandler implements Runnable {
                 .sender(username)
                 .recipient(targetName)
                 .content(msg.getContent())
-                .timestamp(timestamp);
+                .timestamp(timestamp)
+                .color(registry.getColor(username));
 
         target.sendMessage(outgoing);
         sendMessage(outgoing);

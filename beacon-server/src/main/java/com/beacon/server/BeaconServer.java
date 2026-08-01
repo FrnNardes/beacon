@@ -66,6 +66,7 @@ public class BeaconServer {
     }
 
     public static void main(String[] args) {
+        com.beacon.protocol.BeaconBanner.print("Beacon Server TCP/UDP");
         int port = 4040;
         if (args.length > 0) {
             try {

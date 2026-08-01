@@ -45,10 +45,6 @@ beacon/
 - [x] **Embedded H2 Database Persistence** for users and chat history (stored in `~/.beacon/`).
 - [x] **Message History on Login** (recent public/private messages rendered on join).
 - [x] **Public Broadcast Chat** (`MESSAGE`, `JOINED`, `LEFT`).
-- [x] **Private Direct Messaging** (`/msg <username> <message>`).
-- [x] **Active User Listing** (`/list`).
-- [x] **Message History Search** (`/search <keyword>`).
-- [x] **Session Statistics** (`/stats` command for total messages/users stats).
 - [x] **Interactive CLI Commands** (`/msg`, `/list`, `/search`, `/stats`, `/quit`).
 
 ### 🟡 Roadmap / In Development
