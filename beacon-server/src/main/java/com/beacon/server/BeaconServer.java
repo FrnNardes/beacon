@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
 /**
  * Beacon chat server entry point.
  * Opens a TCP ServerSocket and spawns one thread per connecting client.
+ * Also starts a UDP server on TCP port + 1 for discovery and typing relay.
  */
 public class BeaconServer {
 
@@ -25,6 +26,7 @@ public class BeaconServer {
 
     private final UserRepository userRepo;
     private final MessageRepository messageRepo;
+    private UdpServer udpServer;
 
     public BeaconServer(int port, UserRepository userRepo, MessageRepository messageRepo) {
         this.port = port;
@@ -33,8 +35,16 @@ public class BeaconServer {
     }
 
     public void start() {
+        // Start UDP server on port TCP+1 (convention: 4040 → 4041)
+        int udpPort = port + 1;
+        udpServer = new UdpServer(udpPort, port, registry);
+        Thread udpThread = new Thread(udpServer, "udp-server");
+        udpThread.setDaemon(true);
+        udpThread.start();
+
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("Beacon Server listening on port " + port);
+            System.out.println("Beacon Server listening on TCP port " + port
+                    + ", UDP port " + udpPort);
             System.out.println("Waiting for connections...");
 
             while (true) {
@@ -47,6 +57,11 @@ public class BeaconServer {
             }
         } catch (IOException e) {
             System.err.println("Server error: " + e.getMessage());
+        } finally {
+            if (udpServer != null) {
+                udpServer.stop();
+            }
+            threadPool.shutdownNow();
         }
     }
 
@@ -81,3 +96,4 @@ public class BeaconServer {
         }
     }
 }
+

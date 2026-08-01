@@ -2,23 +2,49 @@ package com.beacon.client;
 
 import com.beacon.protocol.Message;
 import com.beacon.protocol.MessageType;
+import com.beacon.protocol.ProtocolException;
 import com.beacon.protocol.ProtocolUtil;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.Socket;
+import java.net.SocketException;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Scanner;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Beacon chat client entry point.
  * Connects to the server via TCP, logs in, then enters a send/receive loop.
+ * Also manages UDP for server discovery (RF-08) and typing indicators (RF-09).
  */
 public class BeaconClient {
 
     private final String host;
     private final int port;
+
+    /** UDP socket shared between typing sender (main thread) and receiver (daemon thread). */
+    private DatagramSocket udpSocket;
+    private InetAddress serverAddress;
+    private int udpPort;
+    private String username;
+
+    /**
+     * Tracks when each remote user was last seen typing.
+     * Entries older than TYPING_EXPIRY_MS are cleaned up and the indicator is cleared.
+     */
+    private final ConcurrentHashMap<String, Long> typingUsers = new ConcurrentHashMap<>();
+    private static final long TYPING_EXPIRY_MS = 3000; // 3 seconds
+
+    /** Throttle: minimum interval between TYPING datagrams sent (1 per second). */
+    private long lastTypingSentMs = 0;
+    private static final long TYPING_THROTTLE_MS = 1000;
 
     public BeaconClient(String host, int port) {
         this.host = host;
@@ -36,7 +62,7 @@ public class BeaconClient {
             Scanner scanner = new Scanner(System.in);
 
             System.out.print("Username: ");
-            String username = scanner.nextLine().trim();
+            username = scanner.nextLine().trim();
             System.out.print("Password: ");
             String password = scanner.nextLine().trim();
 
@@ -52,6 +78,9 @@ public class BeaconClient {
             readerThread.setDaemon(true); // dies when main thread exits
             readerThread.start();
 
+            // ── Start UDP typing indicator ───────────────────────────────
+            initUdpTyping(socket.getInetAddress());
+
             // Main thread: read user input and send to server
             inputLoop(scanner, out, username);
 
@@ -60,17 +89,155 @@ public class BeaconClient {
         } catch (IOException e) {
             System.err.println("Connection failed: " + e.getMessage());
             System.err.println("Make sure the server is running on " + host + ":" + port);
+        } finally {
+            if (udpSocket != null && !udpSocket.isClosed()) {
+                udpSocket.close();
+            }
+        }
+    }
+
+    /**
+     * Initializes the UDP socket for typing indicators and starts
+     * the receiver daemon thread.
+     *
+     * The same DatagramSocket is used for both sending (main thread)
+     * and receiving (daemon thread) — DatagramSocket is thread-safe
+     * for concurrent send/receive operations.
+     */
+    private void initUdpTyping(InetAddress serverAddr) {
+        try {
+            this.serverAddress = serverAddr;
+            this.udpPort = port + 1; // Convention: UDP = TCP + 1
+            this.udpSocket = new DatagramSocket(); // ephemeral port
+
+            // Start receiver thread
+            Thread typingReceiver = new Thread(this::udpTypingReceiveLoop, "udp-typing-receiver");
+            typingReceiver.setDaemon(true);
+            typingReceiver.start();
+
+            // Start expiry cleaner thread
+            Thread typingCleaner = new Thread(this::typingExpiryCleaner, "typing-expiry-cleaner");
+            typingCleaner.setDaemon(true);
+            typingCleaner.start();
+
+            System.out.println("[UDP] Typing indicator active (server UDP port " + udpPort + ")");
+        } catch (SocketException e) {
+            System.err.println("[UDP] Failed to initialize typing: " + e.getMessage());
+            // Non-fatal — TCP chat continues to work without typing indicators
+        }
+    }
+
+    /**
+     * Sends a TYPING indicator to the server via UDP.
+     * Throttled to at most one datagram per second to avoid flooding.
+     *
+     * Private-aware: if the user is typing a /msg command, the recipient
+     * field is set so the server only relays to that specific user.
+     *
+     * @param input the current input line (used to detect /msg recipient)
+     */
+    private void sendTypingIndicator(String input) {
+        if (udpSocket == null || udpSocket.isClosed()) return;
+
+        long now = System.currentTimeMillis();
+        if (now - lastTypingSentMs < TYPING_THROTTLE_MS) return;
+        lastTypingSentMs = now;
+
+        try {
+            Message typing = new Message(MessageType.TYPING).sender(username);
+
+            // Private-aware: detect /msg <recipient> pattern
+            if (input.startsWith("/msg ")) {
+                String[] parts = input.split("\\s+", 3);
+                if (parts.length >= 2) {
+                    typing.recipient(parts[1]);
+                }
+            }
+
+            byte[] data = ProtocolUtil.toUdpBytes(typing);
+            DatagramPacket packet = new DatagramPacket(
+                    data, data.length, serverAddress, udpPort);
+            udpSocket.send(packet);
+        } catch (IOException e) {
+            // Silently ignore — typing indicators are loss-tolerant
+        }
+    }
+
+    /**
+     * Daemon loop that receives TYPING datagrams from the server.
+     * Displays "X is typing..." when a typing indicator arrives,
+     * and tracks the timestamp for expiry.
+     */
+    private void udpTypingReceiveLoop() {
+        byte[] buffer = new byte[512];
+
+        while (!udpSocket.isClosed()) {
+            try {
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                udpSocket.receive(packet);
+
+                Message msg = ProtocolUtil.fromUdpBytes(
+                        packet.getData(), packet.getLength());
+
+                if (msg.getType() == MessageType.TYPING && msg.getSender() != null) {
+                    String sender = msg.getSender();
+                    // Don't show our own typing indicator
+                    if (!sender.equals(username)) {
+                        boolean isNew = !typingUsers.containsKey(sender);
+                        typingUsers.put(sender, System.currentTimeMillis());
+
+                        if (isNew) {
+                            System.out.println("  " + sender + " is typing...");
+                        }
+                    }
+                }
+            } catch (SocketException e) {
+                // Socket closed — clean shutdown
+                break;
+            } catch (IOException | ProtocolException e) {
+                // Ignore malformed datagrams — loss-tolerant by design
+            }
+        }
+    }
+
+    /**
+     * Periodically checks for expired typing indicators (older than 3s)
+     * and clears them from the display.
+     */
+    private void typingExpiryCleaner() {
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                Thread.sleep(500); // check every 500ms
+
+                long now = System.currentTimeMillis();
+                Iterator<Map.Entry<String, Long>> it = typingUsers.entrySet().iterator();
+                while (it.hasNext()) {
+                    Map.Entry<String, Long> entry = it.next();
+                    if (now - entry.getValue() > TYPING_EXPIRY_MS) {
+                        it.remove();
+                        // Typing indicator expired — no visual cleanup needed
+                        // since the next message will push it off screen
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
     }
 
     /**
      * Reads user input line by line and sends to server.
      * Parses commands (/msg, /list, /quit, etc.) or sends as broadcast.
+     * Sends a TYPING indicator via UDP before each message.
      */
     private void inputLoop(Scanner scanner, PrintWriter out, String username) {
         while (scanner.hasNextLine()) {
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) continue;
+
+            // Send typing indicator via UDP before processing the message
+            sendTypingIndicator(input);
 
             Message msg = parseInput(input);
             if (msg == null) continue;
@@ -134,8 +301,7 @@ public class BeaconClient {
     }
 
     public static void main(String[] args) {
-        // Defaults — will be replaced with Picocli parsing in a later slice
-        String host = "localhost";
+        String host = null;
         int port = 4040;
 
         if (args.length >= 1) host = args[0];
@@ -147,6 +313,42 @@ public class BeaconClient {
             }
         }
 
+        // ── UDP Discovery fallback (RF-08) ───────────────────────────────
+        // If no host was provided, try to discover the server on the LAN
+        if (host == null) {
+            int udpPort = port + 1; // Convention: UDP = TCP + 1
+            String discovered = UdpDiscoveryClient.discover(udpPort);
+
+            if (discovered != null) {
+                // Parse "host:port" from discovery response
+                String[] parts = discovered.split(":");
+                host = parts[0];
+                if (parts.length >= 2) {
+                    try {
+                        port = Integer.parseInt(parts[1]);
+                    } catch (NumberFormatException e) {
+                        // Keep default port
+                    }
+                }
+            } else {
+                // Discovery failed — prompt for manual input
+                Scanner scanner = new Scanner(System.in);
+                System.out.println("[Discovery] Could not find a server automatically.");
+                System.out.print("Server host: ");
+                host = scanner.nextLine().trim();
+                System.out.print("Server port [" + port + "]: ");
+                String portInput = scanner.nextLine().trim();
+                if (!portInput.isEmpty()) {
+                    try {
+                        port = Integer.parseInt(portInput);
+                    } catch (NumberFormatException e) {
+                        System.err.println("Invalid port. Using default " + port);
+                    }
+                }
+            }
+        }
+
         new BeaconClient(host, port).start();
     }
 }
+
