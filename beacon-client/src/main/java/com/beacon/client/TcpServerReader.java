@@ -56,10 +56,23 @@ public class TcpServerReader implements Runnable {
                     formatTimestamp(msg) + "[PM] " + msg.getSender() + " → " +
                     msg.getRecipient() + ": " + msg.getContent());
 
+            // History messages are past messages sent on login
+            case HISTORY -> System.out.println(
+                    "  " + formatTimestamp(msg) + msg.getSender() + ": " + msg.getContent());
+
             case JOINED -> System.out.println("[+] " + msg.getSender() + " joined the beacon");
             case LEFT -> System.out.println("[-] " + msg.getSender() + " left the beacon");
 
             case USER_LIST -> System.out.println("[users] " + msg.getContent());
+
+            case SEARCH_RESULT -> System.out.println(
+                    "  🔍 " + formatTimestamp(msg) + msg.getSender() + ": " + msg.getContent());
+
+            case STATS_RESULT -> {
+                System.out.println("── stats ──────────────────");
+                System.out.println(msg.getContent());
+                System.out.println("───────────────────────────");
+            }
 
             case ERROR -> System.out.println("[!] " + msg.getContent());
 

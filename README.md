@@ -41,15 +41,17 @@ beacon/
 - [x] **Multi-module Maven Structure** (Java 21 source/target).
 - [x] **JSON Envelope Protocol** (`Message` with `MessageType`, `sender`, `recipient`, `content`, `timestamp`, `color`).
 - [x] **Concurrent Multi-Client Server** using cached thread pooling.
-- [x] **User Registration & Login Session** tracking (`LOGIN`, `LOGIN_OK`, `LOGIN_ERROR`).
+- [x] **User Registration & BCrypt Password Auth** with automatic auto-registration.
+- [x] **Embedded H2 Database Persistence** for users and chat history (stored in `~/.beacon/`).
+- [x] **Message History on Login** (recent public/private messages rendered on join).
 - [x] **Public Broadcast Chat** (`MESSAGE`, `JOINED`, `LEFT`).
 - [x] **Private Direct Messaging** (`/msg <username> <message>`).
 - [x] **Active User Listing** (`/list`).
+- [x] **Message History Search** (`/search <keyword>`).
+- [x] **Session Statistics** (`/stats` command for total messages/users stats).
 - [x] **Interactive CLI Commands** (`/msg`, `/list`, `/search`, `/stats`, `/quit`).
 
 ### 🟡 Roadmap / In Development
-- [ ] **Database Persistence**: H2 integration for user accounts and historical message storage.
-- [ ] **Secure Authentication**: Password hashing with BCrypt.
 - [ ] **Rich Terminal UI**: JLine 3 & JANSI integration for colored output and beacon status panel.
 - [ ] **UDP Auto-Discovery**: Automatic local network server broadcast (`DISCOVER_SERVER`).
 - [ ] **Typing Indicators**: Real-time typing status over UDP (`TYPING`).
