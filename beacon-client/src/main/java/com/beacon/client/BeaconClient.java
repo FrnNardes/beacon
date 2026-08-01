@@ -33,15 +33,17 @@ public class BeaconClient {
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
 
-            System.out.println("Connected! Enter your username:");
-
             Scanner scanner = new Scanner(System.in);
-            String username = scanner.nextLine().trim();
 
-            // Send LOGIN message to the server
+            System.out.print("Username: ");
+            String username = scanner.nextLine().trim();
+            System.out.print("Password: ");
+            String password = scanner.nextLine().trim();
+
+            // Send LOGIN message with password in the content field
             Message loginMsg = new Message(MessageType.LOGIN)
                     .sender(username)
-                    .content(""); // password empty for now (Slice 5)
+                    .content(password);
             out.println(ProtocolUtil.serialize(loginMsg));
 
             // Start background thread to receive messages from server
