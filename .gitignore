@@ -1,0 +1,4 @@
+.vscode
+/beacon-protocol/target
+/beacon-server/target
+/beacon-client/target
