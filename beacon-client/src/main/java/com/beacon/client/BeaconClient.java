@@ -128,12 +128,13 @@ public class BeaconClient {
                 if (response.getType() == MessageType.LOGIN_ERROR) {
                     ui.printAbove(ui.formatError("Login failed: " + response.getContent()));
                     return false;
-                } else if (response.getType() != MessageType.LOGIN_OK) {
+                } else if (response.getType() == MessageType.LOGIN_OK) {
+                    ui.setMyUsername(username);
+                    ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] Logged in successfully!").reset().toString());
+                } else {
                     ui.printAbove(ui.formatError("Unexpected response: " + response.getType()));
                     return false;
                 }
-                
-                ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] Logged in successfully!").reset().toString());
             } catch (ProtocolException e) {
                 ui.printAbove(ui.formatError("Invalid login response from server"));
                 return false;

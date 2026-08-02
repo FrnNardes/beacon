@@ -112,6 +112,16 @@ public class TerminalUI {
      * Prints a formatted line ABOVE the current input prompt.
      * This ensures incoming messages don't interrupt what the user is typing.
      */
+    private String myUsername;
+
+    public void setMyUsername(String username) {
+        this.myUsername = username != null ? username.toLowerCase() : null;
+    }
+
+    /**
+     * Prints a formatted line ABOVE the current input prompt.
+     * This ensures incoming messages don't interrupt what the user is typing.
+     */
     public void printAbove(String text) {
         lineReader.printAbove(text);
     }
@@ -142,6 +152,15 @@ public class TerminalUI {
     public String formatMessage(Message msg, boolean isHistory) {
         String ts = formatTimestamp(msg);
         
+        String content = msg.getContent();
+        boolean mentioned = false;
+        if (myUsername != null && content != null && content.toLowerCase().contains("@" + myUsername)) {
+            // Highlight mention and trigger terminal bell
+            content = content.replaceAll("(?i)@" + myUsername, 
+                ansi().bgYellow().fgBlack().a("@" + myUsername).reset().toString());
+            mentioned = true;
+        }
+
         if (isHistory) {
             // Dimmed history
             return ansi().fgBrightBlack().a(ts + msg.getSender() + ": " + msg.getContent()).reset().toString();
@@ -156,7 +175,12 @@ public class TerminalUI {
             ansi.fgBrightDefault(); // fallback
         }
         
-        ansi.a(msg.getSender()).reset().a(": " + msg.getContent());
+        ansi.a(msg.getSender()).reset().a(": " + content);
+        
+        if (mentioned) {
+            ansi.a("\u0007"); // Terminal bell
+        }
+        
         return ansi.toString();
     }
 
