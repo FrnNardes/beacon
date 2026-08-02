@@ -146,6 +146,7 @@ public class UdpServer implements Runnable {
     private void handleTyping(Message msg, DatagramPacket packet) {
         String sender = msg.getSender();
         if (sender == null || sender.isBlank()) return;
+        sender = sender.toLowerCase();
 
         // Only relay typing for users who are actually logged in via TCP
         if (!registry.isOnline(sender)) return;
@@ -158,6 +159,7 @@ public class UdpServer implements Runnable {
         // Relay to the appropriate recipients
         String recipient = msg.getRecipient();
         if (recipient != null && !recipient.isBlank()) {
+            recipient = recipient.toLowerCase();
             // Private typing: forward only to the specific recipient
             registry.sendUdpTo(recipient, msg, socket);
         } else {

@@ -8,6 +8,14 @@ import org.fusesource.jansi.Ansi;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+import com.beacon.protocol.MessageType;
 
 /**
  * Background thread that reads messages from the server's TCP socket.
@@ -16,11 +24,14 @@ import java.io.IOException;
 public class TcpServerReader implements Runnable {
 
     private final BufferedReader in;
+    private final PrintWriter out;
     private final TerminalUI ui;
     private volatile boolean running = true;
+    private final Map<String, String> incomingFiles = new HashMap<>();
 
-    public TcpServerReader(BufferedReader in, TerminalUI ui) {
+    public TcpServerReader(BufferedReader in, PrintWriter out, TerminalUI ui) {
         this.in = in;
+        this.out = out;
         this.ui = ui;
     }
 
@@ -31,7 +42,12 @@ public class TcpServerReader implements Runnable {
             while (running && (line = in.readLine()) != null) {
                 try {
                     Message msg = ProtocolUtil.deserialize(line);
-                    displayMessage(msg);
+                    if (msg.getType() == MessageType.PING) {
+                        Message pong = new Message(MessageType.PONG).content(msg.getContent());
+                        out.println(ProtocolUtil.serialize(pong));
+                    } else {
+                        displayMessage(msg);
+                    }
                 } catch (ProtocolException e) {
                     ui.printAbove(ui.formatError("Bad message from server: " + e.getMessage()));
                 }
@@ -73,6 +89,30 @@ public class TcpServerReader implements Runnable {
             }
 
             case ERROR -> ui.printAbove(ui.formatError(msg.getContent()));
+
+            case FILE_META -> {
+                String[] parts = msg.getContent().split("\\|");
+                String filename = parts[0];
+                incomingFiles.put(msg.getSender(), filename);
+                ui.printAbove(Ansi.ansi().fgYellow().a("[↓] Receiving file '" + filename + "' from " + msg.getSender() + "...").reset().toString());
+            }
+
+            case FILE_DATA -> {
+                String filename = incomingFiles.remove(msg.getSender());
+                if (filename == null) {
+                    filename = "unknown_file_" + System.currentTimeMillis() + ".dat";
+                }
+                try {
+                    byte[] data = Base64.getDecoder().decode(msg.getContent());
+                    Path downloadDir = Paths.get(System.getProperty("user.home"), ".beacon", "downloads");
+                    Files.createDirectories(downloadDir);
+                    Path filePath = downloadDir.resolve(filename);
+                    Files.write(filePath, data);
+                    ui.printAbove(Ansi.ansi().fgGreen().a("[✓] File saved to " + filePath).reset().toString());
+                } catch (Exception e) {
+                    ui.printAbove(ui.formatError("Failed to save incoming file: " + e.getMessage()));
+                }
+            }
 
             default -> ui.printAbove("[?] " + msg);
         }

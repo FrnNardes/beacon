@@ -6,6 +6,7 @@ import org.fusesource.jansi.Ansi;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.Reference;
+import org.jline.reader.impl.DefaultParser;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.AttributedString;
@@ -36,9 +37,14 @@ public class TerminalUI {
                 .system(true)
                 .build();
 
+        DefaultParser parser = new DefaultParser();
+        parser.setEscapeChars(null); // Disable backslash escaping for Windows paths
+
         this.lineReader = LineReaderBuilder.builder()
                 .terminal(terminal)
+                .parser(parser)
                 .option(LineReader.Option.ERASE_LINE_ON_FINISH, true)
+                .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
                 .build();
                 
         this.status = Status.getStatus(terminal);

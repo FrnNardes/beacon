@@ -14,6 +14,10 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -136,7 +140,7 @@ public class BeaconClient {
             }
 
             // Start background thread to receive messages from server
-            TcpServerReader reader = new TcpServerReader(in, ui);
+            TcpServerReader reader = new TcpServerReader(in, out, ui);
             Thread readerThread = new Thread(reader, "server-reader");
             readerThread.setDaemon(true); // dies when main thread exits
             readerThread.start();
@@ -319,7 +323,7 @@ public class BeaconClient {
                 if (input.isEmpty())
                     continue;
 
-                Message msg = parseInput(input);
+                Message msg = parseInput(input, out);
                 if (msg == null)
                     continue;
 
@@ -341,15 +345,15 @@ public class BeaconClient {
      * Converts user input into a protocol Message.
      * Commands start with /. Anything else is a broadcast message.
      */
-    private Message parseInput(String input) {
+    private Message parseInput(String input, PrintWriter out) {
         if (input.startsWith("/")) {
-            return parseCommand(input);
+            return parseCommand(input, out);
         }
         // Regular text → broadcast MESSAGE
         return new Message(MessageType.MESSAGE).content(input);
     }
 
-    private Message parseCommand(String input) {
+    private Message parseCommand(String input, PrintWriter out) {
         String[] parts = input.split("\\s+", 3); // split into max 3 parts
         String command = parts[0].toLowerCase();
 
@@ -377,6 +381,47 @@ public class BeaconClient {
             }
 
             case "/stats" -> new Message(MessageType.STATS);
+
+            case "/sendfile" -> {
+                if (parts.length < 3) {
+                    ui.printAbove(ui.formatError("Usage: /sendfile <username> <filepath>"));
+                    yield null;
+                }
+                String recipient = parts[1];
+                Path filePath = Paths.get(parts[2]);
+                if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+                    ui.printAbove(ui.formatError("File not found: " + filePath));
+                    yield null;
+                }
+                try {
+                    long size = Files.size(filePath);
+                    if (size > 5 * 1024 * 1024) { // 5MB limit
+                        ui.printAbove(ui.formatError("File too large (limit 5MB)."));
+                        yield null;
+                    }
+                    ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgYellow().a("[*] Reading file and encoding...").reset().toString());
+                    byte[] data = Files.readAllBytes(filePath);
+                    String base64 = Base64.getEncoder().encodeToString(data);
+                    
+                    // Send FILE_META
+                    String metaContent = filePath.getFileName().toString() + "|" + size;
+                    Message meta = new Message(MessageType.FILE_META)
+                            .recipient(recipient)
+                            .content(metaContent);
+                    out.println(ProtocolUtil.serialize(meta));
+                    
+                    // Send FILE_DATA
+                    Message fileData = new Message(MessageType.FILE_DATA)
+                            .recipient(recipient)
+                            .content(base64);
+                    out.println(ProtocolUtil.serialize(fileData));
+                    
+                    ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] File sent to " + recipient).reset().toString());
+                } catch (IOException e) {
+                    ui.printAbove(ui.formatError("Failed to read file: " + e.getMessage()));
+                }
+                yield null; // We already sent the messages
+            }
 
             default -> {
                 ui.printAbove(ui.formatError("Unknown command: " + command));

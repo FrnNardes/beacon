@@ -38,6 +38,9 @@ public class ClientHandler implements Runnable {
     private String username;
     private int messagesSentThisSession = 0;
     private long sessionStartTime;
+    private volatile long lastPongTime;
+    private volatile long currentRtt = 0;
+    private Thread heartbeatThread;
 
     public ClientHandler(Socket socket, ClientRegistry registry,
                          UserRepository userRepo, MessageRepository messageRepo) {
@@ -53,6 +56,8 @@ public class ClientHandler implements Runnable {
             setupStreams();
             if (!handleLogin()) return;
             sessionStartTime = System.currentTimeMillis();
+            lastPongTime = System.currentTimeMillis();
+            startHeartbeat();
             readLoop();
         } catch (IOException e) {
             System.out.println("[!] Connection error with " +
@@ -92,6 +97,7 @@ public class ClientHandler implements Runnable {
             sendMessage(new Message(MessageType.LOGIN_ERROR).content("Username cannot be empty"));
             return false;
         }
+        requestedName = requestedName.toLowerCase();
 
         // Check if user is already online (different from DB existence)
         if (registry.isOnline(requestedName)) {
@@ -163,8 +169,9 @@ public class ClientHandler implements Runnable {
                 case LIST -> handleList();
                 case SEARCH -> handleSearch(msg);
                 case STATS -> handleStats();
+                case FILE_META, FILE_DATA -> handleFileTransfer(msg);
                 case QUIT -> { return; }
-                case PONG -> {} // heartbeat — used in a later slice
+                case PONG -> handlePong(msg);
                 default -> sendMessage(new Message(MessageType.ERROR)
                         .content("Unexpected message type: " + msg.getType()));
             }
@@ -200,6 +207,7 @@ public class ClientHandler implements Runnable {
             sendMessage(new Message(MessageType.ERROR).content("Recipient is required"));
             return;
         }
+        targetName = targetName.toLowerCase();
 
         ClientHandler target = registry.getClient(targetName);
         if (target == null) {
@@ -242,7 +250,7 @@ public class ClientHandler implements Runnable {
         }
 
         try {
-            List<Message> results = messageRepo.searchMessages(keyword, SEARCH_LIMIT);
+            List<Message> results = messageRepo.searchMessages(keyword, 20);
             if (results.isEmpty()) {
                 sendMessage(new Message(MessageType.SEARCH_RESULT)
                         .content("No messages found for: " + keyword));
@@ -254,6 +262,58 @@ public class ClientHandler implements Runnable {
         } catch (SQLException e) {
             sendMessage(new Message(MessageType.ERROR).content("Search failed: " + e.getMessage()));
         }
+    }
+
+    private void handleFileTransfer(Message msg) {
+        String targetName = msg.getRecipient();
+        if (targetName == null || targetName.isBlank()) {
+            sendMessage(new Message(MessageType.ERROR).content("Recipient is required for file transfer"));
+            return;
+        }
+        targetName = targetName.toLowerCase();
+
+        ClientHandler target = registry.getClient(targetName);
+        if (target == null) {
+            sendMessage(new Message(MessageType.ERROR).content("User not found: " + targetName));
+            return;
+        }
+
+        // Just forward the message directly to the recipient
+        // We override the sender so the recipient knows who sent it
+        msg.sender(username);
+        target.sendMessage(msg);
+    }
+
+    private void handlePong(Message msg) {
+        lastPongTime = System.currentTimeMillis();
+        try {
+            long sentTime = Long.parseLong(msg.getContent());
+            currentRtt = lastPongTime - sentTime;
+        } catch (NumberFormatException ignored) {}
+    }
+
+    private void startHeartbeat() {
+        heartbeatThread = new Thread(() -> {
+            while (!socket.isClosed()) {
+                try {
+                    Thread.sleep(10000); // 10 seconds
+                    
+                    if (System.currentTimeMillis() - lastPongTime > 30000) {
+                        System.out.println("[!] " + username + " timed out (no PONG for 30s)");
+                        disconnect();
+                        break;
+                    }
+                    
+                    sendMessage(new Message(MessageType.PING)
+                            .content(String.valueOf(System.currentTimeMillis())));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }, "heartbeat-" + username);
+        heartbeatThread.setDaemon(true);
+        heartbeatThread.start();
     }
 
     private void handleStats() {
@@ -272,6 +332,7 @@ public class ClientHandler implements Runnable {
                 "Messages sent this session: " + messagesSentThisSession,
                 "Session duration: " + minutes + "m " + seconds + "s",
                 "Users online: " + registry.getOnlineCount(),
+                "Current latency (RTT): " + currentRtt + " ms",
                 "Total messages (all time): " + totalMessages
         );
 
