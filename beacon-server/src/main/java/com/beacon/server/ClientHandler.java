@@ -250,7 +250,7 @@ public class ClientHandler implements Runnable {
         }
 
         try {
-            List<Message> results = messageRepo.searchMessages(keyword, 20);
+            List<Message> results = messageRepo.searchMessages(this.username, keyword, 20);
             if (results.isEmpty()) {
                 sendMessage(new Message(MessageType.SEARCH_RESULT)
                         .content("No messages found for: " + keyword));

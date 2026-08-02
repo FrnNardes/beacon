@@ -73,18 +73,21 @@ public class MessageRepository {
      * Searches message content for a keyword. Returns up to 20 recent matches.
      * Uses SQL LIKE with wildcards — simple but sufficient for our scale.
      */
-    public List<Message> searchMessages(String keyword, int limit) throws SQLException {
+    public List<Message> searchMessages(String username, String keyword, int limit) throws SQLException {
         try (Connection conn = db.getConnection();
              PreparedStatement ps = conn.prepareStatement("""
                      SELECT id, sender, recipient, content, timestamp
                      FROM messages
                      WHERE LOWER(content) LIKE LOWER(?)
+                     AND (recipient IS NULL OR sender = ? OR recipient = ?)
                      ORDER BY timestamp DESC
                      LIMIT ?
                      """)) {
 
             ps.setString(1, "%" + keyword + "%");
-            ps.setInt(2, limit);
+            ps.setString(2, username);
+            ps.setString(3, username);
+            ps.setInt(4, limit);
             ResultSet rs = ps.executeQuery();
 
             List<Message> messages = new ArrayList<>();
