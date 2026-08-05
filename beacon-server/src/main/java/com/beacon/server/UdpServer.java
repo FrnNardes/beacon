@@ -4,6 +4,7 @@ import com.beacon.protocol.Message;
 import com.beacon.protocol.MessageType;
 import com.beacon.protocol.ProtocolException;
 import com.beacon.protocol.ProtocolUtil;
+import com.beacon.server.ui.ServerUI;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -50,7 +51,7 @@ public class UdpServer implements Runnable {
     public void run() {
         try {
             socket = new DatagramSocket(udpPort);
-            System.out.println("[UDP] Listening on port " + udpPort
+            ServerUI.log("[UDP] Listening on port " + udpPort
                     + " (discovery + typing relay)");
 
             byte[] buffer = new byte[BUFFER_SIZE];
@@ -64,22 +65,22 @@ public class UdpServer implements Runnable {
                             packet.getData(), packet.getLength());
                     handleMessage(msg, packet);
                 } catch (ProtocolException e) {
-                    System.err.println("[UDP] Malformed datagram from "
+                    ServerUI.logError("[UDP] Malformed datagram from "
                             + packet.getAddress() + ": " + e.getMessage());
                 }
             }
         } catch (SocketException e) {
             if (running) {
-                System.err.println("[UDP] Socket error: " + e.getMessage());
+                ServerUI.logError("[UDP] Socket error: " + e.getMessage());
             }
             // If !running, this was a clean shutdown via stop()
         } catch (IOException e) {
-            System.err.println("[UDP] I/O error: " + e.getMessage());
+            ServerUI.logError("[UDP] I/O error: " + e.getMessage());
         } finally {
             if (socket != null && !socket.isClosed()) {
                 socket.close();
             }
-            System.out.println("[UDP] Server stopped.");
+            ServerUI.log("[UDP] Server stopped.");
         }
     }
 
@@ -90,7 +91,7 @@ public class UdpServer implements Runnable {
         switch (msg.getType()) {
             case DISCOVER_SERVER -> handleDiscovery(packet);
             case TYPING -> handleTyping(msg, packet);
-            default -> System.err.println("[UDP] Unexpected message type: " + msg.getType());
+            default -> ServerUI.logError("[UDP] Unexpected message type: " + msg.getType());
         }
     }
 
@@ -128,7 +129,7 @@ public class UdpServer implements Runnable {
                 request.getAddress(), request.getPort());
         socket.send(response);
 
-        System.out.println("[UDP] Discovery reply sent to "
+        ServerUI.log("[UDP] Discovery reply sent to "
                 + request.getAddress().getHostAddress() + ":" + request.getPort()
                 + " → " + tcpAddress + ":" + tcpPort);
     }
@@ -179,3 +180,4 @@ public class UdpServer implements Runnable {
         }
     }
 }
+

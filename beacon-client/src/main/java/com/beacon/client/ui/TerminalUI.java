@@ -32,6 +32,16 @@ public class TerminalUI {
     private final String promptString;
 
     public TerminalUI(Consumer<String> onKeystroke) throws IOException {
+        // Enter Alternate Screen Buffer for the chat client
+        System.out.print("\033[?1049h");
+        System.out.flush();
+
+        // Restore normal screen when client exits
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.print("\033[?1049l");
+            System.out.flush();
+        }));
+
         // Initialize JLine terminal (auto-detects Jansi on Windows)
         this.terminal = TerminalBuilder.builder()
                 .system(true)
@@ -105,7 +115,39 @@ public class TerminalUI {
     }
 
     public void printBanner() {
-        BeaconBanner.print("Beacon Client");
+        String[] bannerLines = {
+            "  ██████╗ ███████╗ █████╗  ██████╗ ██████╗ ███╗   ██╗",
+            "  ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔═══██╗████╗  ██║",
+            "  ██████╦╝█████╗  ███████║██║     ██║   ██║██╔██╗ ██║",
+            "  ██╔══██╗██╔══╝  ██╔══██║██║     ██║   ██║██║╚██╗██║",
+            "  ██████╦╝███████╗██║  ██║╚██████╗╚██████╔╝██║ ╚████║",
+            "  ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝"
+        };
+        
+        // Smooth Sky Blue gradient (Deep Blue on edges, Bright Cyan in the center)
+        String[] rainbow = {
+            "26", "32", "33", "39", "45", "81", "117", 
+            "153", 
+            "117", "81", "45", "39", "33", "32", "26"
+        };
+
+        // Clear the screen and reset cursor (like the old BeaconBanner did)
+        System.out.print("\033[H\033[2J");
+        System.out.flush();
+
+        System.out.println();
+        for (String line : bannerLines) {
+            StringBuilder sb = new StringBuilder();
+            for (int j = 0; j < line.length(); j++) {
+                // Map the horizontal character index (0-55) to the 30-color rainbow array
+                int c = (j * rainbow.length) / Math.max(1, line.length());
+                sb.append("\033[38;5;").append(rainbow[c]).append("m").append(line.charAt(j));
+            }
+            sb.append("\033[0m");
+            System.out.println(sb.toString());
+        }
+        System.out.println();
+        System.out.println(ansi().fgBrightYellow().a("                      Beacon Client\n").reset());
     }
 
     /**

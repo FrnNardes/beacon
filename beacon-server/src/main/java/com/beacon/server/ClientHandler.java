@@ -6,6 +6,7 @@ import com.beacon.protocol.ProtocolException;
 import com.beacon.protocol.ProtocolUtil;
 import com.beacon.server.persistence.MessageRepository;
 import com.beacon.server.persistence.UserRepository;
+import com.beacon.server.ui.ServerUI;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -60,7 +61,7 @@ public class ClientHandler implements Runnable {
             startHeartbeat();
             readLoop();
         } catch (IOException e) {
-            System.out.println("[!] Connection error with " +
+            ServerUI.log("[!] Connection error with " +
                     (username != null ? username : socket.getRemoteSocketAddress()) +
                     ": " + e.getMessage());
         } finally {
@@ -114,7 +115,7 @@ public class ClientHandler implements Runnable {
                 return false;
             }
         } catch (SQLException e) {
-            System.err.println("[!] DB error during login: " + e.getMessage());
+            ServerUI.logError("[!] DB error during login: " + e.getMessage());
             sendMessage(new Message(MessageType.LOGIN_ERROR).content("Server database error"));
             return false;
         }
@@ -130,7 +131,7 @@ public class ClientHandler implements Runnable {
         // Assign a unique color from the server palette
         String color = registry.assignColor(username);
         sendMessage(new Message(MessageType.LOGIN_OK).color(color));
-        System.out.println("[+] " + username + " logged in from " + socket.getRemoteSocketAddress());
+        ServerUI.log("[+] " + username + " logged in from " + socket.getRemoteSocketAddress());
 
         // Send recent message history (dimmed on client side)
         sendHistory();
@@ -146,7 +147,7 @@ public class ClientHandler implements Runnable {
                 sendMessage(msg);
             }
         } catch (SQLException e) {
-            System.err.println("[!] Failed to load history: " + e.getMessage());
+            ServerUI.logError("[!] Failed to load history: " + e.getMessage());
         }
     }
 
@@ -181,12 +182,13 @@ public class ClientHandler implements Runnable {
     // ── Message handlers ───────────────────────────────────────
 
     private void handleBroadcast(Message msg) {
+        registry.incrementMessages();
         String timestamp = now();
         int id;
         try {
             id = messageRepo.saveMessage(username, null, msg.getContent());
         } catch (SQLException e) {
-            System.err.println("[!] Failed to save message: " + e.getMessage());
+            ServerUI.logError("[!] Failed to save message: " + e.getMessage());
             id = -1; // still send the message even if DB fails
         }
 
@@ -202,6 +204,7 @@ public class ClientHandler implements Runnable {
     }
 
     private void handlePrivate(Message msg) {
+        registry.incrementMessages();
         String targetName = msg.getRecipient();
         if (targetName == null || targetName.isBlank()) {
             sendMessage(new Message(MessageType.ERROR).content("Recipient is required"));
@@ -220,7 +223,7 @@ public class ClientHandler implements Runnable {
         try {
             id = messageRepo.saveMessage(username, targetName, msg.getContent());
         } catch (SQLException e) {
-            System.err.println("[!] Failed to save private message: " + e.getMessage());
+            ServerUI.logError("[!] Failed to save private message: " + e.getMessage());
             id = -1;
         }
 
@@ -299,7 +302,7 @@ public class ClientHandler implements Runnable {
                     Thread.sleep(10000); // 10 seconds
                     
                     if (System.currentTimeMillis() - lastPongTime > 30000) {
-                        System.out.println("[!] " + username + " timed out (no PONG for 30s)");
+                        ServerUI.log("[!] " + username + " timed out (no PONG for 30s)");
                         disconnect();
                         break;
                     }
@@ -364,7 +367,7 @@ public class ClientHandler implements Runnable {
         if (username != null) {
             registry.unregister(username);
             broadcast(new Message(MessageType.LEFT).sender(username));
-            System.out.println("[-] " + username + " disconnected");
+            ServerUI.log("[-] " + username + " disconnected");
         }
         try {
             socket.close();
@@ -378,4 +381,10 @@ public class ClientHandler implements Runnable {
     public String getUsername() {
         return username;
     }
+
+    public long getCurrentRtt() {
+        return currentRtt;
+    }
 }
+
+

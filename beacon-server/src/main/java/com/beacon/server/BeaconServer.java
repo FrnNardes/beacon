@@ -3,6 +3,7 @@ package com.beacon.server;
 import com.beacon.server.persistence.DatabaseManager;
 import com.beacon.server.persistence.MessageRepository;
 import com.beacon.server.persistence.UserRepository;
+import com.beacon.server.ui.ServerUI;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -35,6 +36,9 @@ public class BeaconServer {
     }
 
     public void start() {
+        ServerUI ui = new ServerUI(registry);
+        ui.start();
+
         // Start UDP server on port TCP+1 (convention: 4040 → 4041)
         int udpPort = port + 1;
         udpServer = new UdpServer(udpPort, port, registry);
@@ -43,20 +47,20 @@ public class BeaconServer {
         udpThread.start();
 
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("Beacon Server listening on TCP port " + port
+            ServerUI.log("Beacon Server listening on TCP port " + port
                     + ", UDP port " + udpPort);
-            System.out.println("Waiting for connections...");
+            ServerUI.log("Waiting for connections...");
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("[*] New connection from " + clientSocket.getRemoteSocketAddress());
+                ServerUI.log("[*] New connection from " + clientSocket.getRemoteSocketAddress());
 
                 ClientHandler handler = new ClientHandler(
                         clientSocket, registry, userRepo, messageRepo);
                 threadPool.execute(handler);
             }
         } catch (IOException e) {
-            System.err.println("Server error: " + e.getMessage());
+            ServerUI.logError("Server error: " + e.getMessage());
         } finally {
             if (udpServer != null) {
                 udpServer.stop();
@@ -66,13 +70,12 @@ public class BeaconServer {
     }
 
     public static void main(String[] args) {
-        com.beacon.protocol.BeaconBanner.print("Beacon Server TCP/UDP");
         int port = 4040;
         if (args.length > 0) {
             try {
                 port = Integer.parseInt(args[0]);
             } catch (NumberFormatException e) {
-                System.err.println("Invalid port: " + args[0] + ". Using default " + port);
+                ServerUI.logError("Invalid port: " + args[0] + ". Using default " + port);
             }
         }
 
@@ -91,10 +94,11 @@ public class BeaconServer {
             new BeaconServer(port, userRepo, messageRepo).start();
 
         } catch (SQLException e) {
-            System.err.println("Database error: " + e.getMessage());
+            ServerUI.logError("Database error: " + e.getMessage());
         } catch (IOException e) {
-            System.err.println("Failed to create database directory: " + e.getMessage());
+            ServerUI.logError("Failed to create database directory: " + e.getMessage());
         }
     }
 }
+
 

@@ -22,6 +22,32 @@ public class ClientRegistry {
 
     private final ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
 
+    // ── Dashboard Metrics ────────────────────────────────────────────────
+    private final long serverStartTime = System.currentTimeMillis();
+    private final AtomicInteger totalMessagesProcessed = new AtomicInteger(0);
+    private final AtomicInteger recentDisconnects = new AtomicInteger(0);
+
+    public long getUptimeMs() {
+        return System.currentTimeMillis() - serverStartTime;
+    }
+
+    public void incrementMessages() {
+        totalMessagesProcessed.incrementAndGet();
+    }
+
+    public int getTotalMessages() {
+        return totalMessagesProcessed.get();
+    }
+
+    public void recordDisconnect() {
+        recentDisconnects.incrementAndGet();
+    }
+
+    public int consumeRecentDisconnects() {
+        return recentDisconnects.getAndSet(0);
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     /**
      * UDP addresses of clients, learned from the source address of their first TYPING datagram.
      */
@@ -74,6 +100,7 @@ public class ClientRegistry {
     public void unregister(String username) {
         clients.remove(username);
         udpAddresses.remove(username);
+        recordDisconnect();
     }
 
     public ClientHandler getClient(String username) {
