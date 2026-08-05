@@ -76,6 +76,7 @@ public class TcpServerReader implements Runnable {
 
             case JOINED -> ui.printAbove(ui.formatSystem(msg, "JOINED", Ansi.Color.GREEN));
             case LEFT -> ui.printAbove(ui.formatSystem(msg, "LEFT", Ansi.Color.RED));
+            case SYSTEM -> ui.printAbove(Ansi.ansi().fgYellow().a("[SYSTEM] " + msg.getContent()).reset().toString());
 
             case USER_LIST -> ui.printAbove(Ansi.ansi().fgCyan().a("[users] " + msg.getContent()).reset().toString());
 

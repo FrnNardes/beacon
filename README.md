@@ -48,7 +48,8 @@ beacon/
 - [x] **Interactive CLI Commands** (`/msg`, `/list`, `/search`, `/stats`, `/quit`).
 
 ### 🟡 Roadmap / In Development
-- [ ] **Rich Terminal UI**: JLine 3 & JANSI integration for colored output and beacon status panel.
+- [x] **Rich Terminal UI**: JLine 3 & JANSI integration for colored output and live server dashboard (Beacon Themes).
+- [ ] **Thematic Channels**: Dynamic chat rooms (`#general`, etc).
 - [ ] **UDP Auto-Discovery**: Automatic local network server broadcast (`DISCOVER_SERVER`).
 - [ ] **Typing Indicators**: Real-time typing status over UDP (`TYPING`).
 - [ ] **Heartbeat & Latency (RTT)**: Ping/pong diagnostics (`PING` / `PONG`).

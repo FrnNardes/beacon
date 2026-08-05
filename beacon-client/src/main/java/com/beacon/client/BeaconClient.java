@@ -9,22 +9,9 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.net.Socket;
-import java.net.SocketException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Base64;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
 import java.util.Scanner;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.beacon.client.ui.TerminalUI;
 import org.jline.reader.UserInterruptException;
@@ -40,26 +27,7 @@ public class BeaconClient {
     private final String host;
     private final int port;
 
-    /**
-     * UDP socket shared between typing sender (main thread) and receiver (daemon
-     * thread).
-     */
-    private DatagramSocket udpSocket;
-    private InetAddress serverAddress;
-    private int udpPort;
-    private String username;
-
-    /**
-     * Tracks when each remote user was last seen typing.
-     * Entries older than TYPING_EXPIRY_MS are cleaned up and the indicator is
-     * cleared.
-     */
-    private final ConcurrentHashMap<String, Long> typingUsers = new ConcurrentHashMap<>();
-    private static final long TYPING_EXPIRY_MS = 3000; // 3 seconds
-
-    /** Throttle: minimum interval between TYPING datagrams sent (1 per second). */
-    private long lastTypingSentMs = 0;
-    private static final long TYPING_THROTTLE_MS = 1000;
+    private final UdpTypingManager typingManager = new UdpTypingManager();
 
     public BeaconClient(String host, int port) {
         this.host = host;
@@ -70,7 +38,7 @@ public class BeaconClient {
 
     public void start() {
         try {
-            ui = new TerminalUI(this::sendTypingIndicator);
+            ui = new TerminalUI(typingManager::sendTypingIndicator);
             ui.printBanner();
         } catch (IOException e) {
             System.err.println("Failed to initialize terminal: " + e.getMessage());
@@ -88,6 +56,7 @@ public class BeaconClient {
 
     private boolean connectAndRun() {
         String password = null;
+        String username = null;
         try {
             String userPrompt = org.fusesource.jansi.Ansi.ansi().fgCyan().a("Username: ").reset().toString();
             username = ui.getLineReader().readLine(userPrompt).trim();
@@ -96,7 +65,7 @@ public class BeaconClient {
             }
             
             String passPrompt = org.fusesource.jansi.Ansi.ansi().fgCyan().a("Password: ").reset().toString();
-            password = ui.getLineReader().readLine(passPrompt, '*').trim(); // Mask password
+            password = ui.getLineReader().readLine(passPrompt, '*').trim(); 
             if (password.equalsIgnoreCase("/quit") || password.equalsIgnoreCase("quit") || password.equalsIgnoreCase("exit")) {
                 return true;
             }
@@ -147,7 +116,7 @@ public class BeaconClient {
             readerThread.start();
 
             // ── Start UDP typing indicator ───────────────────────────────
-            initUdpTyping(socket.getInetAddress());
+            typingManager.start(socket.getInetAddress(), port, username, ui);
 
             // Main thread: read user input and send to server
             inputLoop(out, username);
@@ -160,152 +129,7 @@ public class BeaconClient {
             ui.printAbove(ui.formatError("Make sure the server is running on " + host + ":" + port));
             return false;
         } finally {
-            if (udpSocket != null && !udpSocket.isClosed()) {
-                udpSocket.close();
-            }
-        }
-    }
-
-    /**
-     * Initializes the UDP socket for typing indicators and starts
-     * the receiver daemon thread.
-     *
-     * The same DatagramSocket is used for both sending (main thread)
-     * and receiving (daemon thread) — DatagramSocket is thread-safe
-     * for concurrent send/receive operations.
-     */
-    private void initUdpTyping(InetAddress serverAddr) {
-        try {
-            this.serverAddress = serverAddr;
-            this.udpPort = port + 1; // Convention: UDP = TCP + 1
-            this.udpSocket = new DatagramSocket(); // ephemeral port
-
-            // Start receiver thread
-            Thread typingReceiver = new Thread(this::udpTypingReceiveLoop, "udp-typing-receiver");
-            typingReceiver.setDaemon(true);
-            typingReceiver.start();
-
-            // Start expiry cleaner thread
-            Thread typingCleaner = new Thread(this::typingExpiryCleaner, "typing-expiry-cleaner");
-            typingCleaner.setDaemon(true);
-            typingCleaner.start();
-
-            // ui.printAbove("[UDP] Typing indicator active (server UDP port " + udpPort +
-            // ")");
-        } catch (SocketException e) {
-            ui.printAbove(ui.formatError("[UDP] Failed to initialize typing: " + e.getMessage()));
-            // Non-fatal — TCP chat continues to work without typing indicators
-        }
-    }
-
-    /**
-     * Sends a TYPING indicator to the server via UDP.
-     * Throttled to at most one datagram per second to avoid flooding.
-     *
-     * Private-aware: if the user is typing a /msg command, the recipient
-     * field is set so the server only relays to that specific user.
-     *
-     * @param input the current input line (used to detect /msg recipient)
-     */
-    private void sendTypingIndicator(String input) {
-        if (udpSocket == null || udpSocket.isClosed())
-            return;
-
-        long now = System.currentTimeMillis();
-        if (now - lastTypingSentMs < TYPING_THROTTLE_MS)
-            return;
-        lastTypingSentMs = now;
-
-        try {
-            Message typing = new Message(MessageType.TYPING).sender(username);
-
-            // Private-aware: detect /msg <recipient> pattern
-            if (input.startsWith("/msg ")) {
-                String[] parts = input.split("\\s+", 3);
-                if (parts.length >= 2) {
-                    typing.recipient(parts[1]);
-                }
-            }
-
-            byte[] data = ProtocolUtil.toUdpBytes(typing);
-            DatagramPacket packet = new DatagramPacket(
-                    data, data.length, serverAddress, udpPort);
-            udpSocket.send(packet);
-        } catch (IOException e) {
-            // Silently ignore — typing indicators are loss-tolerant
-        }
-    }
-
-    /**
-     * Daemon loop that receives TYPING datagrams from the server.
-     * Displays "X is typing..." when a typing indicator arrives,
-     * and tracks the timestamp for expiry.
-     */
-    private void udpTypingReceiveLoop() {
-        byte[] buffer = new byte[512];
-
-        while (!udpSocket.isClosed()) {
-            try {
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                udpSocket.receive(packet);
-
-                Message msg = ProtocolUtil.fromUdpBytes(
-                        packet.getData(), packet.getLength());
-
-                if (msg.getType() == MessageType.TYPING && msg.getSender() != null) {
-                    String sender = msg.getSender();
-                    // Don't show our own typing indicator
-                    if (!sender.equals(username)) {
-                        boolean isNew = !typingUsers.containsKey(sender);
-                        typingUsers.put(sender, System.currentTimeMillis());
-
-                        if (isNew) {
-                            updateTypingUI();
-                        }
-                    }
-                }
-            } catch (SocketException e) {
-                // Socket closed — clean shutdown
-                break;
-            } catch (IOException | ProtocolException e) {
-                // Ignore malformed datagrams — loss-tolerant by design
-            }
-        }
-    }
-
-    /**
-     * Periodically checks for expired typing indicators (older than 3s)
-     * and clears them from the display.
-     */
-    private void typingExpiryCleaner() {
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                Thread.sleep(500); // check every 500ms
-
-                long now = System.currentTimeMillis();
-                boolean changed = false;
-                Iterator<Map.Entry<String, Long>> it = typingUsers.entrySet().iterator();
-                while (it.hasNext()) {
-                    Map.Entry<String, Long> entry = it.next();
-                    if (now - entry.getValue() > TYPING_EXPIRY_MS) {
-                        it.remove();
-                        changed = true;
-                    }
-                }
-                if (changed) {
-                    updateTypingUI();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
-
-    private void updateTypingUI() {
-        if (ui != null) {
-            Set<String> activeTypers = new HashSet<>(typingUsers.keySet());
-            ui.updatePrompt(activeTypers);
+            typingManager.stop();
         }
     }
 
@@ -315,6 +139,7 @@ public class BeaconClient {
      */
     private void inputLoop(PrintWriter out, String username) {
         ui.updatePrompt(Collections.emptySet()); // initialize prompt
+        CommandParser parser = new CommandParser(ui, out);
 
         while (true) {
             try {
@@ -324,7 +149,7 @@ public class BeaconClient {
                 if (input.isEmpty())
                     continue;
 
-                Message msg = parseInput(input, out);
+                Message msg = parser.parse(input);
                 if (msg == null)
                     continue;
 
@@ -340,96 +165,6 @@ public class BeaconClient {
                 break;
             }
         }
-    }
-
-    /**
-     * Converts user input into a protocol Message.
-     * Commands start with /. Anything else is a broadcast message.
-     */
-    private Message parseInput(String input, PrintWriter out) {
-        if (input.startsWith("/")) {
-            return parseCommand(input, out);
-        }
-        // Regular text → broadcast MESSAGE
-        return new Message(MessageType.MESSAGE).content(input);
-    }
-
-    private Message parseCommand(String input, PrintWriter out) {
-        String[] parts = input.split("\\s+", 3); // split into max 3 parts
-        String command = parts[0].toLowerCase();
-
-        return switch (command) {
-            case "/quit" -> new Message(MessageType.QUIT);
-
-            case "/list" -> new Message(MessageType.LIST);
-
-            case "/msg" -> {
-                if (parts.length < 3) {
-                    ui.printAbove(ui.formatError("Usage: /msg <username> <message>"));
-                    yield null; // null means "don't send anything"
-                }
-                yield new Message(MessageType.PRIVATE)
-                        .recipient(parts[1])
-                        .content(parts[2]);
-            }
-
-            case "/search" -> {
-                if (parts.length < 2) {
-                    ui.printAbove(ui.formatError("Usage: /search <keyword>"));
-                    yield null;
-                }
-                yield new Message(MessageType.SEARCH).content(parts[1]);
-            }
-
-            case "/stats" -> new Message(MessageType.STATS);
-
-            case "/sendfile" -> {
-                if (parts.length < 3) {
-                    ui.printAbove(ui.formatError("Usage: /sendfile <username> <filepath>"));
-                    yield null;
-                }
-                String recipient = parts[1];
-                Path filePath = Paths.get(parts[2]);
-                if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
-                    ui.printAbove(ui.formatError("File not found: " + filePath));
-                    yield null;
-                }
-                try {
-                    long size = Files.size(filePath);
-                    if (size > 5 * 1024 * 1024) { // 5MB limit
-                        ui.printAbove(ui.formatError("File too large (limit 5MB)."));
-                        yield null;
-                    }
-                    ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgYellow().a("[*] Reading file and encoding...").reset().toString());
-                    byte[] data = Files.readAllBytes(filePath);
-                    String base64 = Base64.getEncoder().encodeToString(data);
-                    
-                    // Send FILE_META
-                    String metaContent = filePath.getFileName().toString() + "|" + size;
-                    Message meta = new Message(MessageType.FILE_META)
-                            .recipient(recipient)
-                            .content(metaContent);
-                    out.println(ProtocolUtil.serialize(meta));
-                    
-                    // Send FILE_DATA
-                    Message fileData = new Message(MessageType.FILE_DATA)
-                            .recipient(recipient)
-                            .content(base64);
-                    out.println(ProtocolUtil.serialize(fileData));
-                    
-                    ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] File sent to " + recipient).reset().toString());
-                } catch (IOException e) {
-                    ui.printAbove(ui.formatError("Failed to read file: " + e.getMessage()));
-                }
-                yield null; // We already sent the messages
-            }
-
-            default -> {
-                ui.printAbove(ui.formatError("Unknown command: " + command));
-                ui.printAbove(ui.formatError("Available: /msg /list /search /stats /quit"));
-                yield null;
-            }
-        };
     }
 
     public static void main(String[] args) {
@@ -465,6 +200,7 @@ public class BeaconClient {
                 }
             } else {
                 // Discovery failed — prompt for manual input
+                @SuppressWarnings("resource")
                 Scanner scanner = new Scanner(System.in);
                 System.out.println("[Discovery] Could not find a server automatically.");
                 System.out.print("Server host: ");
