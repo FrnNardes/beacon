@@ -43,6 +43,40 @@ public class CommandParser {
             case "/listall" -> new Message(MessageType.LIST_ALL);
             case "/stats" -> new Message(MessageType.STATS);
 
+            case "/creeper" -> {
+                String g = "\u001B[102m  \u001B[0m"; // Bright Green Background
+                String b = "\u001B[40m  \u001B[0m"; // Black Background
+                yield new Message(MessageType.MESSAGE).content(
+                        "\n" +
+                                g + g + g + g + g + g + g + g + "\n" +
+                                g + g + g + g + g + g + g + g + "\n" +
+                                g + b + b + g + g + b + b + g + "\n" +
+                                g + b + b + g + g + b + b + g + "\n" +
+                                g + g + g + b + b + g + g + g + "\n" +
+                                g + g + b + b + b + b + g + g + "\n" +
+                                g + g + b + b + b + b + g + g + "\n" +
+                                g + g + b + g + g + b + g + g);
+            }
+
+            case "/herobrine" -> {
+                String h = "\u001B[48;2;35;23;9m  \u001B[0m"; // Hair (#231709)
+                String b = "\u001B[48;2;55;26;12m  \u001B[0m"; // Beard (#371a0c)
+                String s = "\u001B[48;2;148;110;89m  \u001B[0m"; // Skin (#946e59)
+                String n = "\u001B[48;2;102;68;51m  \u001B[0m"; // Nose
+                String m = "\u001B[48;2;130;70;70m  \u001B[0m"; // Mouth
+                String e = "\u001B[48;2;255;255;255m  \u001B[0m"; // Eyes
+                yield new Message(MessageType.MESSAGE).content(
+                        "\n" +
+                                h + h + h + h + h + h + h + h + "\n" +
+                                h + h + h + h + h + h + h + h + "\n" +
+                                h + s + s + s + s + s + s + h + "\n" +
+                                s + s + s + s + s + s + s + s + "\n" +
+                                s + e + e + s + s + e + e + s + "\n" +
+                                s + s + s + n + n + s + s + s + "\n" +
+                                s + s + b + m + m + b + s + s + "\n" +
+                                s + s + b + b + b + b + s + s + "\n");
+            }
+
             case "/msg" -> {
                 if (parts.length < 3) {
                     ui.printAbove(ui.formatError("Usage: /msg <username> <message>"));
@@ -77,7 +111,7 @@ public class CommandParser {
                     yield null;
                 }
                 sendFile(parts[1], parts[2]);
-                yield null; 
+                yield null;
             }
 
             default -> {
@@ -96,26 +130,28 @@ public class CommandParser {
         }
         try {
             long size = Files.size(filePath);
-            if (size > 5 * 1024 * 1024) { 
+            if (size > 5 * 1024 * 1024) {
                 ui.printAbove(ui.formatError("File too large (limit 5MB)."));
                 return;
             }
-            ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgYellow().a("[*] Reading file and encoding...").reset().toString());
+            ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgYellow().a("[*] Reading file and encoding...").reset()
+                    .toString());
             byte[] data = Files.readAllBytes(filePath);
             String base64 = Base64.getEncoder().encodeToString(data);
-            
+
             String metaContent = filePath.getFileName().toString() + "|" + size;
             Message meta = new Message(MessageType.FILE_META)
                     .recipient(recipient)
                     .content(metaContent);
             out.println(ProtocolUtil.serialize(meta));
-            
+
             Message fileData = new Message(MessageType.FILE_DATA)
                     .recipient(recipient)
                     .content(base64);
             out.println(ProtocolUtil.serialize(fileData));
-            
-            ui.printAbove(org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] File sent to " + recipient).reset().toString());
+
+            ui.printAbove(
+                    org.fusesource.jansi.Ansi.ansi().fgGreen().a("[✓] File sent to " + recipient).reset().toString());
         } catch (IOException e) {
             ui.printAbove(ui.formatError("Failed to read file: " + e.getMessage()));
         }

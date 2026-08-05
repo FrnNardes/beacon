@@ -21,6 +21,19 @@ import java.sql.SQLException;
  */
 public class ClientHandler implements Runnable {
 
+    private static final String[] DEATH_MESSAGES = {
+        "fell out of the world",
+        "experienced kinetic energy",
+        "was blown up by Creeper",
+        "tried to swim in lava",
+        "was slain by Zombie",
+        "starved to death",
+        "went up in flames",
+        "hit the ground too hard",
+        "was squashed by a falling anvil",
+        "was struck by lightning"
+    };
+
     private final Socket socket;
     private final ClientRegistry registry;
     private final UserRepository userRepo;
@@ -217,7 +230,8 @@ public class ClientHandler implements Runnable {
     private void disconnect() {
         if (username != null) {
             registry.unregister(username);
-            broadcast(new Message(MessageType.LEFT).sender(username), currentChannel);
+            String deathMsg = DEATH_MESSAGES[new java.util.Random().nextInt(DEATH_MESSAGES.length)];
+            broadcast(new Message(MessageType.LEFT).sender(username).content(deathMsg), currentChannel);
             ServerUI.log("[-] " + username + " disconnected");
         }
         try {
