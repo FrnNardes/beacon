@@ -16,6 +16,7 @@ import java.util.Scanner;
 import com.beacon.client.ui.TerminalUI;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.EndOfFileException;
+import org.fusesource.jansi.AnsiConsole;
 
 /**
  * Beacon chat client entry point.
@@ -168,6 +169,14 @@ public class BeaconClient {
     }
 
     public static void main(String[] args) {
+        // Must run before ANY System.out usage / JLine terminal creation.
+        // Installs a filtered PrintStream that translates ANSI escape codes
+        // into native Win32 console calls on terminals that don't support
+        // ANSI natively (old cmd.exe), and passes them through unchanged on
+        // terminals that already do (Linux/macOS/modern Windows Terminal).
+        AnsiConsole.systemInstall();
+        Runtime.getRuntime().addShutdownHook(new Thread(AnsiConsole::systemUninstall));
+
         String host = null;
         int port = 4040;
 

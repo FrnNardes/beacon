@@ -4,6 +4,7 @@ import com.beacon.server.persistence.DatabaseManager;
 import com.beacon.server.persistence.MessageRepository;
 import com.beacon.server.persistence.UserRepository;
 import com.beacon.server.ui.ServerUI;
+import org.fusesource.jansi.AnsiConsole;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -70,6 +71,15 @@ public class BeaconServer {
     }
 
     public static void main(String[] args) {
+        // Must run before ANY System.out usage. This installs a filtered
+        // PrintStream that translates ANSI escape codes into native Win32
+        // console calls on Windows terminals that don't support ANSI natively
+        // (e.g. old cmd.exe), and passes them through unchanged on terminals
+        // that already support ANSI (Linux/macOS/modern Windows Terminal).
+        System.setProperty("jansi.colors", "256");
+        AnsiConsole.systemInstall();
+        Runtime.getRuntime().addShutdownHook(new Thread(AnsiConsole::systemUninstall));
+
         int port = 4040;
         if (args.length > 0) {
             try {

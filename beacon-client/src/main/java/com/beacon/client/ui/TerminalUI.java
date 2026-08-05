@@ -145,11 +145,13 @@ public class TerminalUI {
             rainbow[i] = rainbow[14 - i];
         }
 
-        // Clear the screen and reset cursor for the new channel
-        System.out.print("\033[H\033[2J");
-        System.out.flush();
+        // Clear the screen and reset cursor for the new channel.
+        // Written through the JLine terminal's writer (not System.out) so it
+        // goes through the same PTY/Windows-console abstraction JLine used to
+        // detect ANSI support in the first place.
+        terminal.writer().print("\033[H\033[2J");
 
-        System.out.println();
+        terminal.writer().println();
         for (String line : bannerLines) {
             StringBuilder sb = new StringBuilder();
             for (int j = 0; j < line.length(); j++) {
@@ -157,12 +159,13 @@ public class TerminalUI {
                 sb.append("\033[38;5;").append(rainbow[c]).append("m").append(line.charAt(j));
             }
             sb.append("\033[0m");
-            System.out.println(sb.toString());
+            terminal.writer().println(sb.toString());
         }
-        System.out.println();
+        terminal.writer().println();
         String subtitle = "Beacon Channel - #" + currentChannel;
         int paddingLength = Math.max(0, (55 - subtitle.length()) / 2);
-        System.out.println(ansi().fgBrightYellow().a(" ".repeat(paddingLength) + subtitle + "\n").reset());
+        terminal.writer().println(ansi().fgBrightYellow().a(" ".repeat(paddingLength) + subtitle + "\n").reset());
+        terminal.flush();
     }
 
     /**
