@@ -186,16 +186,17 @@ public class TerminalUI {
 
     public String formatPrivate(Message msg, boolean isHistory) {
         String ts = formatTimestamp(msg);
-        Ansi ansi = ansi();
+        Ansi ansi = ansi().a(ts);
         
         if (isHistory) {
-            ansi.fgBrightBlack();
+            ansi.fgBrightBlack().a("[PM] " + msg.getSender() + " → " + msg.getRecipient() + ": " + msg.getContent());
         } else {
-            ansi.fgMagenta();
+            // Dark Grey background for the PM badge, and grey text for the message
+            ansi.a("\u001B[100m").fg(Ansi.Color.WHITE).bold().a(" PM ").reset()
+                .fgBrightBlack().a(" " + msg.getSender() + " → " + msg.getRecipient() + ": " + msg.getContent());
         }
         
-        ansi.a(ts + "[PM] " + msg.getSender() + " → " + msg.getRecipient() + ": " + msg.getContent()).reset();
-        return ansi.toString();
+        return ansi.reset().toString();
     }
 
     public String formatSystem(Message msg, String action, Ansi.Color color) {
