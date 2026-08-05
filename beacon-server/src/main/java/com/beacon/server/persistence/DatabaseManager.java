@@ -42,10 +42,18 @@ public class DatabaseManager {
                     id        INTEGER PRIMARY KEY AUTO_INCREMENT,
                     sender    VARCHAR(30) NOT NULL,
                     recipient VARCHAR(30),
+                    channel   VARCHAR(50) DEFAULT 'global',
                     content   TEXT NOT NULL,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+
+            // Migration: Add channel column if it doesn't exist (for older DBs)
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN channel VARCHAR(50) DEFAULT 'global'");
+            } catch (SQLException e) {
+                // Ignore: column already exists
+            }
 
             System.out.println("[db] Database initialized at " + jdbcUrl);
         }

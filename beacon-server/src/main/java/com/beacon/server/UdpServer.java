@@ -104,7 +104,6 @@ public class UdpServer implements Runnable {
         // Use the server's own address as seen by the network interface
         // that received the broadcast — this ensures the client gets a
         // routable address, not 0.0.0.0 or localhost.
-        InetAddress serverAddress = request.getAddress();
         String tcpAddress = socket.getLocalAddress().getHostAddress();
 
         // If bound to wildcard (0.0.0.0), use the destination address

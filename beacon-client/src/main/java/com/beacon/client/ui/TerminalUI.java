@@ -29,18 +29,10 @@ public class TerminalUI {
     private final Terminal terminal;
     private final LineReader lineReader;
     private final Status status;
-    private final String promptString;
+    private String promptString;
 
     public TerminalUI(Consumer<String> onKeystroke) throws IOException {
-        // Enter Alternate Screen Buffer for the chat client
-        System.out.print("\033[?1049h");
-        System.out.flush();
-
-        // Restore normal screen when client exits
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.print("\033[?1049l");
-            System.out.flush();
-        }));
+        // We no longer use Alternate Screen Buffer here so users can scroll back to read chat history.
 
         // Initialize JLine terminal (auto-detects Jansi on Windows)
         this.terminal = TerminalBuilder.builder()
@@ -58,7 +50,7 @@ public class TerminalUI {
                 .build();
                 
         this.status = Status.getStatus(terminal);
-        this.promptString = ansi().fg(Ansi.Color.YELLOW).a("> ").reset().toString();
+        this.promptString = ansi().fg(Ansi.Color.YELLOW).a("[#global] > ").reset().toString();
 
         // Bind a custom widget to every printable character keystroke
         // so we can fire typing indicators immediately
@@ -114,6 +106,14 @@ public class TerminalUI {
         return lineReader;
     }
 
+    private String currentChannel = "global";
+
+    public void setChannel(String channel) {
+        this.currentChannel = channel;
+        this.promptString = ansi().fg(Ansi.Color.YELLOW).a("[#" + channel + "] > ").reset().toString();
+        printBanner();
+    }
+
     public void printBanner() {
         String[] bannerLines = {
             "  ██████╗ ███████╗ █████╗  ██████╗ ██████╗ ███╗   ██╗",
@@ -124,14 +124,27 @@ public class TerminalUI {
             "  ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝"
         };
         
-        // Smooth Sky Blue gradient (Deep Blue on edges, Bright Cyan in the center)
-        String[] rainbow = {
-            "26", "32", "33", "39", "45", "81", "117", 
-            "153", 
-            "117", "81", "45", "39", "33", "32", "26"
-        };
+        // Procedurally generate a 14-element smooth gradient based on the channel name's hash!
+        String[] rainbow = new String[14];
+        int hash = Math.abs(currentChannel.hashCode());
+        int sweepMode = hash % 3; // 0=Red, 1=Green, 2=Blue
+        int base1 = (hash / 3) % 4 + 1; // Base color 1 (1-4)
+        int base2 = (hash / 12) % 4 + 1; // Base color 2 (1-4)
+        
+        for (int i = 0; i < 8; i++) {
+            int sweep = (i * 5) / 7; // Sweeps from 0 to 5
+            int r = (sweepMode == 0) ? sweep : ((sweepMode == 1) ? base1 : base2);
+            int g = (sweepMode == 1) ? sweep : ((sweepMode == 0) ? base1 : base2);
+            int b = (sweepMode == 2) ? sweep : ((sweepMode == 0) ? base2 : base1);
+            int ansiIndex = 16 + (36 * r) + (6 * g) + b;
+            rainbow[i] = String.valueOf(ansiIndex);
+        }
+        // Mirror the array to make it palindromic (smooth sliding window)
+        for (int i = 8; i < 14; i++) {
+            rainbow[i] = rainbow[14 - i];
+        }
 
-        // Clear the screen and reset cursor (like the old BeaconBanner did)
+        // Clear the screen and reset cursor for the new channel
         System.out.print("\033[H\033[2J");
         System.out.flush();
 
@@ -139,7 +152,6 @@ public class TerminalUI {
         for (String line : bannerLines) {
             StringBuilder sb = new StringBuilder();
             for (int j = 0; j < line.length(); j++) {
-                // Map the horizontal character index (0-55) to the 30-color rainbow array
                 int c = (j * rainbow.length) / Math.max(1, line.length());
                 sb.append("\033[38;5;").append(rainbow[c]).append("m").append(line.charAt(j));
             }
@@ -147,7 +159,9 @@ public class TerminalUI {
             System.out.println(sb.toString());
         }
         System.out.println();
-        System.out.println(ansi().fgBrightYellow().a("                      Beacon Client\n").reset());
+        String subtitle = "Beacon Channel - #" + currentChannel;
+        int paddingLength = Math.max(0, (55 - subtitle.length()) / 2);
+        System.out.println(ansi().fgBrightYellow().a(" ".repeat(paddingLength) + subtitle + "\n").reset());
     }
 
     /**

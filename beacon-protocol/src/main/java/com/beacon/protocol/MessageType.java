@@ -10,10 +10,10 @@ public enum MessageType {
     LOGIN, LOGIN_OK, LOGIN_ERROR,
 
     // Chat (TCP)
-    MESSAGE, PRIVATE,
+    MESSAGE, PRIVATE, SYSTEM,
 
     // User management (TCP)
-    LIST, USER_LIST, JOINED, LEFT, QUIT,
+    LIST, LIST_ALL, USER_LIST, JOINED, LEFT, QUIT,
 
     // Search & statistics (TCP)
     SEARCH, SEARCH_RESULT, STATS, STATS_RESULT,

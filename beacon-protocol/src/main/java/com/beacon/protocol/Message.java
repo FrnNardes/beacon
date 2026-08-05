@@ -14,6 +14,7 @@ public class Message {
     private String content;
     private String timestamp;
     private String color;
+    private String channel = "global";
 
     // Required by Gson for deserialization via reflection
     public Message() {
@@ -61,6 +62,11 @@ public class Message {
         return this;
     }
 
+    public Message channel(String channel) {
+        this.channel = channel;
+        return this;
+    }
+
     // Getters
 
     public MessageType getType() {
@@ -91,6 +97,10 @@ public class Message {
         return color;
     }
 
+    public String getChannel() {
+        return channel;
+    }
+
     @Override
     public String toString() {
         return "Message{type=" + type +
@@ -99,6 +109,7 @@ public class Message {
                 ", recipient='" + recipient + '\'' +
                 ", content='" + content + '\'' +
                 ", timestamp='" + timestamp + '\'' +
+                ", channel='" + channel + '\'' +
                 '}';
     }
 }

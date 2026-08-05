@@ -1,6 +1,5 @@
 package com.beacon.server.ui;
 
-import com.beacon.protocol.BeaconBanner;
 import com.beacon.server.ClientHandler;
 import com.beacon.server.ClientRegistry;
 import org.fusesource.jansi.Ansi;
@@ -20,7 +19,6 @@ public class ServerUI {
     
     // To track Haste effect (messages per second)
     private int lastMessageCount = 0;
-    private int frameCount = 0;
     
     // Singleton pattern so we can easily call ServerUI.log() from anywhere without passing it around
     private static ServerUI instance;
@@ -99,7 +97,6 @@ public class ServerUI {
 
     private void render() {
         StringBuilder sb = new StringBuilder();
-        frameCount++;
 
         // Calculate Metrics
         int onlineUsers = registry.getOnlineCount();
@@ -212,7 +209,9 @@ public class ServerUI {
         }
 
         sb.append("\n");
-        sb.append(Ansi.ansi().fgBrightYellow().a("                      Live Dashboard\n").reset());
+        String serverSubtitle = "Live Dashboard";
+        int serverPadding = Math.max(0, (55 - serverSubtitle.length()) / 2);
+        sb.append(Ansi.ansi().fgBrightYellow().a(" ".repeat(serverPadding) + serverSubtitle + "\n").reset());
         sb.append("\n\n");
 
         // Print Dashboard Box
